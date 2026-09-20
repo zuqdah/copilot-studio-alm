@@ -38,7 +38,6 @@ jobs:
         run: |
           echo "::add-mask::${{ vars.AZURE_CLIENT_ID }}"
           echo "::add-mask::${{ vars.AZURE_TENANT_ID }}"
-          echo "::add-mask::${{ vars.AZURE_SUBSCRIPTION_ID }}"
 
       - name: Install tooling
         shell: pwsh
@@ -53,11 +52,13 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-AgentSource.ps1
 
+      # This deploy touches no Azure resource, only Dataverse, so the identity
+      # holds no subscription role and signs in without one.
       - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
 
       - name: Resolve target environment
         id: target
@@ -75,7 +76,7 @@ jobs:
       - name: Plan
         shell: pwsh
         run: |
-          ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -WhatIf |
+          ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -TenantId '${{ vars.AZURE_TENANT_ID }}' -WhatIf |
             Tee-Object -Variable plan | Out-String | Write-Host
           $planned = $plan.Planned
           "planned=$planned" >> $env:GITHUB_ENV
@@ -85,7 +86,7 @@ jobs:
         if: ${{ inputs.apply }}
         shell: pwsh
         run: |
-          $result = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -Confirm:$false
+          $result = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -TenantId '${{ vars.AZURE_TENANT_ID }}' -Confirm:$false
           $result | Out-String | Write-Host
           "applied_created=$($result.Created)" >> $env:GITHUB_ENV
           "applied_updated=$($result.Updated)" >> $env:GITHUB_ENV
@@ -96,7 +97,7 @@ jobs:
         if: ${{ inputs.apply }}
         shell: pwsh
         run: |
-          $again = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -WhatIf
+          $again = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -TenantId '${{ vars.AZURE_TENANT_ID }}' -WhatIf
           $again | Out-String | Write-Host
           if ($again.Planned -ne 0) {
             throw "A second pass still wants to change $($again.Planned) object(s); the deploy is not idempotent."

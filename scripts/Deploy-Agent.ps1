@@ -17,7 +17,12 @@
     Justification = 'Human-readable change report.')]
 param(
     [Parameter(Mandatory)]
-    [string]$InstanceUrl
+    [string]$InstanceUrl,
+
+    # The deploy identity holds no Azure role: it exists only as an application
+    # user in Dataverse. Without a subscription in context, a token has to be
+    # requested against the tenant explicitly.
+    [string]$TenantId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,7 +31,9 @@ if (-not $InstanceUrl.EndsWith('/')) { $InstanceUrl += '/' }
 $root     = Split-Path $PSScriptRoot -Parent
 $manifest = [System.IO.File]::ReadAllText((Join-Path -Path (Join-Path -Path $root -ChildPath 'agent') -ChildPath 'agent.json')) | ConvertFrom-Json
 
-$token = az account get-access-token --resource $InstanceUrl --query accessToken -o tsv
+$tokenArgs = @('account', 'get-access-token', '--resource', $InstanceUrl, '--query', 'accessToken', '-o', 'tsv')
+if ($TenantId) { $tokenArgs += @('--tenant', $TenantId) }
+$token = & az @tokenArgs
 if (-not $token) { throw "Could not get a token for $InstanceUrl" }
 
 $api             = "${InstanceUrl}api/data/v9.2/"
