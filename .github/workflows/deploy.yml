@@ -1,0 +1,118 @@
+name: Deploy
+
+# Manual only. Nothing here runs on a push.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which environment to deploy to
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+      apply:
+        description: Write changes. Leave false to plan only.
+        type: boolean
+        default: false
+
+concurrency:
+  group: copilot-studio-alm-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.apply && 'Apply' || 'Plan' }} against ${{ inputs.target }}
+    runs-on: windows-latest
+    environment: lab
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mask identifiers
+        shell: bash
+        run: |
+          echo "::add-mask::${{ vars.AZURE_CLIENT_ID }}"
+          echo "::add-mask::${{ vars.AZURE_TENANT_ID }}"
+          echo "::add-mask::${{ vars.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Install tooling
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module powershell-yaml -MinimumVersion 0.4.7 -Force
+
+      # The source has to be coherent before an environment is made to match
+      # it. This is the same check CI runs, repeated here because a deploy can
+      # be dispatched from any ref.
+      - name: Validate agent source
+        shell: pwsh
+        run: ./scripts/Test-AgentSource.ps1
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve target environment
+        id: target
+        shell: pwsh
+        env:
+          DEV_URL: ${{ vars.DATAVERSE_URL_DEV }}
+          PROD_URL: ${{ vars.DATAVERSE_URL_PROD }}
+        run: |
+          $url = if ('${{ inputs.target }}' -eq 'prod') { $env:PROD_URL } else { $env:DEV_URL }
+          if (-not $url) { throw "No Dataverse URL configured for '${{ inputs.target }}'." }
+          "url=$url" >> $env:GITHUB_OUTPUT
+          Write-Host "Target: $url"
+
+      # Plan first, always. The apply below only runs when explicitly asked.
+      - name: Plan
+        shell: pwsh
+        run: |
+          ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -WhatIf |
+            Tee-Object -Variable plan | Out-String | Write-Host
+          $planned = $plan.Planned
+          "planned=$planned" >> $env:GITHUB_ENV
+          Write-Host "Planned changes: $planned"
+
+      - name: Apply
+        if: ${{ inputs.apply }}
+        shell: pwsh
+        run: |
+          $result = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -Confirm:$false
+          $result | Out-String | Write-Host
+          "applied_created=$($result.Created)" >> $env:GITHUB_ENV
+          "applied_updated=$($result.Updated)" >> $env:GITHUB_ENV
+
+      # Running the deploy again must be a no-op. If a second pass still wants
+      # to write, the script is not idempotent and the run fails here.
+      - name: Prove idempotence
+        if: ${{ inputs.apply }}
+        shell: pwsh
+        run: |
+          $again = ./scripts/Deploy-Agent.ps1 -InstanceUrl '${{ steps.target.outputs.url }}' -WhatIf
+          $again | Out-String | Write-Host
+          if ($again.Planned -ne 0) {
+            throw "A second pass still wants to change $($again.Planned) object(s); the deploy is not idempotent."
+          }
+          Write-Host 'Second pass planned 0 changes.'
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $mode = if ('${{ inputs.apply }}' -eq 'true') { 'Applied' } else { 'Planned only' }
+          "### $mode against ``${{ inputs.target }}``"              | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          ""                                                        | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "Plan reported **$env:planned** change(s)."               | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          if ('${{ inputs.apply }}' -eq 'true') {
+            ""                                                      | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            "Created **$env:applied_created**, updated **$env:applied_updated**, and a second pass planned **0**." |
+              Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
