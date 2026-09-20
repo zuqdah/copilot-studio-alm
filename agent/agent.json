@@ -1,0 +1,23 @@
+{
+  "publisher": {
+    "uniqueName": "ziyadlabs",
+    "friendlyName": "Ziyad Labs",
+    "prefix": "zlab",
+    "optionValuePrefix": 72300
+  },
+  "solution": {
+    "uniqueName": "ZiyadOpsAgent",
+    "friendlyName": "Ziyad Ops Agent",
+    "version": "1.0.0.0",
+    "description": "Copilot Studio agent defined as source and promoted from dev to prod."
+  },
+  "agent": {
+    "name": "Ops Assistant",
+    "schemaName": "zlab_opsassistant",
+    "language": 1033
+  },
+  "topics": [
+    { "file": "baseline-controls.yaml", "name": "Baseline Controls", "schemaName": "zlab_baselinecontrols" },
+    { "file": "incident-triage.yaml",   "name": "Incident Triage",   "schemaName": "zlab_incidenttriage" }
+  ]
+}

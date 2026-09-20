@@ -1,0 +1,22 @@
+# Answers questions about the Windows baseline published in lab 5.
+# Authored here, not in the designer: this file is the source of truth and the
+# deploy script upserts it into whichever environment it targets.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    triggerQueries:
+      - what does the windows baseline check
+      - list the baseline controls
+      - which CIS controls are enforced
+  actions:
+    - kind: SendActivity
+      id: sendControls
+      activity: |-
+        The baseline enforces six CIS controls on Windows Server 2025:
+        SMBv1 disabled, RDP requires NLA, PowerShell script block logging,
+        LLMNR disabled, NTLMv2 only, and Windows Installer not always-elevated.
+
+        Auditing reports drift without changing anything. Remediation only
+        touches controls that have actually drifted, so a second run is a no-op.

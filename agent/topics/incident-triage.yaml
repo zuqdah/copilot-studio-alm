@@ -1,0 +1,20 @@
+# Explains the escalation policy from the self-healing AIOps lab.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    triggerQueries:
+      - when does the responder escalate
+      - what happens when an alert fires
+      - does it fix things automatically
+  actions:
+    - kind: SendActivity
+      id: sendPolicy
+      activity: |-
+        An alert is diagnosed from logs, then policy decides one of three
+        outcomes: remediate automatically, escalate to a human, or refuse.
+
+        It refuses when the evidence does not match the remedy. A restart is
+        not a fix for a dependency that is unavailable, so the responder says
+        so instead of acting.
