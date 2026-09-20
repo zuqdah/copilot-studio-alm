@@ -10,9 +10,12 @@
         usage. Both are printed, because either alone is misleading.
 #>
 [CmdletBinding()]
+# This is a console report: the formatted output is the product, not a side
+# effect, so Write-Host is the right stream rather than something to work around.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+    Justification = 'Human-readable console report.')]
 param(
-    [string]$BillingPolicyId = '4e444929-2d60-4f12-9396-fb35c1d72ab4',
-    [string]$ResourceGroup   = 'rg-powerplatform-lab'
+    [string]$BillingPolicyId
 )
 
 $ErrorActionPreference = 'Stop'

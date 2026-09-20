@@ -30,6 +30,7 @@ flowchart LR
 | **Idempotent deployment** | Each object is compared before it is written. A second run reports `Unchanged` and writes nothing: 4 seconds against 24 for the first. |
 | **Drift detection** | Edit one topic and the plan shows exactly one `WouldUpdate` against four `Unchanged`. Remediation touches that component only. |
 | **`-WhatIf` that means something** | The plan runs against a real environment and writes nothing. Verified on an empty environment: 5 planned, 0 written. |
+| **A validator with teeth** | CI does not just run the validator, it injects five known faults and fails if any goes undetected. A check that passes everything proves nothing. |
 | **Cost control by construction** | The pay-as-you-go billing policy enables 4 meters and disables 7. A premium flow run cannot bill $0.60 because that meter is switched off, not because nobody ran one. |
 | **Tenant realism** | Built in a tenant with no Power Platform licences and zero Dataverse capacity, which is what pay-as-you-go exists to solve. |
 
@@ -41,7 +42,10 @@ agent/
   topics/*.yaml         One file per topic; this is the source of truth
 scripts/
   Deploy-Agent.ps1      Idempotent upsert into a target environment
+  Test-AgentSource.ps1  Validates the source tree before anything deploys
   Get-LabCost.ps1       What can bill, and what has
+.github/workflows/
+  ci.yml                Analyze, parse, validate, and prove the validator
 ```
 
 ## How to run it
@@ -49,6 +53,9 @@ scripts/
 **Prerequisites:** Azure CLI, an Azure subscription, and tenant admin rights to create a Power Platform billing policy.
 
 ```powershell
+# Validate the source before touching anything (this is what CI runs)
+./scripts/Test-AgentSource.ps1
+
 # Plan against an environment without changing it
 ./scripts/Deploy-Agent.ps1 -InstanceUrl https://yourorg.crm.dynamics.com/ -WhatIf
 
@@ -59,7 +66,7 @@ scripts/
 ./scripts/Deploy-Agent.ps1 -InstanceUrl https://yourprod.crm.dynamics.com/
 
 # What can bill, and what has
-./scripts/Get-LabCost.ps1
+./scripts/Get-LabCost.ps1 -BillingPolicyId <policy-guid>
 ```
 
 ## Cost

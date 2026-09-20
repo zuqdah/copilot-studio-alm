@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Analyze scripts and validate agent source
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tooling
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -MinimumVersion 1.22.0 -Force
+          Install-Module powershell-yaml -MinimumVersion 0.4.7 -Force
+          Import-Module PSScriptAnalyzer -ErrorAction Stop
+          "PSScriptAnalyzer $((Get-Module PSScriptAnalyzer).Version)"
+
+      - name: Analyze
+        shell: pwsh
+        run: |
+          # -Path takes one string, so the tree is passed on its own.
+          $results = @(Invoke-ScriptAnalyzer -Path scripts -Recurse)
+          if ($results.Count) {
+            $results | Format-Table -AutoSize RuleName, Severity, ScriptName, Line, Message |
+              Out-String -Width 200 | Write-Host
+            throw "PSScriptAnalyzer reported $($results.Count) issue(s)."
+          }
+          Write-Host 'PSScriptAnalyzer is clean.'
+
+      # Every script has to parse before it is shipped; a script that fails at
+      # parse time would fail on the operator's machine instead of here.
+      - name: Parse every script
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) {
+              $bad++
+              Write-Host "FAIL $($_.Name)"
+              $errs | ForEach-Object { Write-Host "     $($_.Message)" }
+            }
+            else { Write-Host "ok   $($_.Name)" }
+          }
+          if ($bad) { throw "$bad script(s) do not parse." }
+
+      # The deploy makes an environment match this source, so the source has to
+      # be coherent first. A schema name typo would create a second component
+      # rather than update the intended one.
+      - name: Validate agent source
+        shell: pwsh
+        run: ./scripts/Test-AgentSource.ps1
+
+      # A validator that passes everything is worth nothing. These are known
+      # faults; each one must be caught.
+      - name: Prove the validator catches faults
+        shell: pwsh
+        run: |
+          $cases = @(
+            @{ Name = 'orphan topic file'; Do = { param($t) Copy-Item "$t/agent/topics/incident-triage.yaml" "$t/agent/topics/orphan.yaml" } }
+            @{ Name = 'missing topic file'; Do = { param($t) Remove-Item "$t/agent/topics/incident-triage.yaml" } }
+            @{ Name = 'schemaName without prefix'; Do = { param($t)
+                 $f = "$t/agent/agent.json"
+                 (Get-Content $f -Raw).Replace('zlab_incidenttriage', 'wrong_incidenttriage') | Set-Content $f } }
+            @{ Name = 'duplicate schemaName'; Do = { param($t)
+                 $f = "$t/agent/agent.json"
+                 (Get-Content $f -Raw).Replace('zlab_incidenttriage', 'zlab_baselinecontrols') | Set-Content $f } }
+            @{ Name = 'malformed YAML'; Do = { param($t)
+                 Add-Content "$t/agent/topics/incident-triage.yaml" "`n  : : bad`n    - [unclosed" } }
+          )
+
+          $missed = 0
+          foreach ($case in $cases) {
+            $tmp = Join-Path $env:RUNNER_TEMP ("case-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+            Copy-Item -Path agent   -Destination "$tmp/agent"   -Recurse -Force
+            Copy-Item -Path scripts -Destination "$tmp/scripts" -Recurse -Force
+            & $case.Do $tmp
+
+            try {
+              ./scripts/Test-AgentSource.ps1 -Path $tmp *> $null
+              Write-Host "MISSED  $($case.Name)"
+              $missed++
+            }
+            catch { Write-Host "caught  $($case.Name)" }
+          }
+          if ($missed) { throw "$missed known fault(s) went undetected." }
+          Write-Host "All $($cases.Count) injected faults were caught."
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $m = [System.IO.File]::ReadAllText('agent/agent.json') | ConvertFrom-Json
+          "### Agent source"                                        | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          ""                                                        | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "Agent **$($m.agent.name)** (`$($m.agent.schemaName)`) in solution **$($m.solution.uniqueName)** v$($m.solution.version), $(@($m.topics).Count) topic(s)." |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append

@@ -12,6 +12,9 @@
         Dataverse URL, e.g. https://org.crm.dynamics.com/
 #>
 [CmdletBinding(SupportsShouldProcess)]
+# The change table is the product of a run, so it goes to the console.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '',
+    Justification = 'Human-readable change report.')]
 param(
     [Parameter(Mandatory)]
     [string]$InstanceUrl
@@ -79,7 +82,7 @@ function Add-Change {
 $p = Invoke-Dv -Path "publishers?`$filter=uniquename eq '$($manifest.publisher.uniqueName)'&`$select=publisherid"
 if ($p.value.Count) {
     $publisherId = $p.value[0].publisherid
-    Add-Change 'publisher' $manifest.publisher.uniqueName 'Exists'
+    Add-Change -Kind 'publisher' -Name $manifest.publisher.uniqueName -Action 'Exists'
 }
 elseif ($PSCmdlet.ShouldProcess($manifest.publisher.uniqueName, 'create publisher')) {
     $null = Invoke-Dv -Method Post -Path 'publishers' -Body @{
@@ -90,14 +93,14 @@ elseif ($PSCmdlet.ShouldProcess($manifest.publisher.uniqueName, 'create publishe
     }
     $p = Invoke-Dv -Path "publishers?`$filter=uniquename eq '$($manifest.publisher.uniqueName)'&`$select=publisherid"
     $publisherId = $p.value[0].publisherid
-    Add-Change 'publisher' $manifest.publisher.uniqueName 'Created'
+    Add-Change -Kind 'publisher' -Name $manifest.publisher.uniqueName -Action 'Created'
 }
-else { Add-Change 'publisher' $manifest.publisher.uniqueName 'WouldCreate'; $publisherId = $null }
+else { Add-Change -Kind 'publisher' -Name $manifest.publisher.uniqueName -Action 'WouldCreate'; $publisherId = $null }
 
 # --- solution --------------------------------------------------------------
 $s = Invoke-Dv -Path "solutions?`$filter=uniquename eq '$($manifest.solution.uniqueName)'&`$select=solutionid,version"
 if ($s.value.Count) {
-    Add-Change 'solution' $manifest.solution.uniqueName 'Exists'
+    Add-Change -Kind 'solution' -Name $manifest.solution.uniqueName -Action 'Exists'
 }
 elseif ($publisherId -and $PSCmdlet.ShouldProcess($manifest.solution.uniqueName, 'create solution')) {
     $null = Invoke-Dv -Method Post -Path 'solutions' -Body @{
@@ -107,16 +110,16 @@ elseif ($publisherId -and $PSCmdlet.ShouldProcess($manifest.solution.uniqueName,
         description              = $manifest.solution.description
         'publisherid@odata.bind' = "/publishers($publisherId)"
     }
-    Add-Change 'solution' $manifest.solution.uniqueName 'Created'
+    Add-Change -Kind 'solution' -Name $manifest.solution.uniqueName -Action 'Created'
 }
-else { Add-Change 'solution' $manifest.solution.uniqueName 'WouldCreate' }
+else { Add-Change -Kind 'solution' -Name $manifest.solution.uniqueName -Action 'WouldCreate' }
 
 # --- agent -----------------------------------------------------------------
 $schema = $manifest.agent.schemaName
 $b = Invoke-Dv -Path "bots?`$filter=schemaname eq '$schema'&`$select=botid,name"
 if ($b.value.Count) {
     $botId = $b.value[0].botid
-    Add-Change 'agent' $manifest.agent.name 'Exists'
+    Add-Change -Kind 'agent' -Name $manifest.agent.name -Action 'Exists'
 }
 elseif ($PSCmdlet.ShouldProcess($manifest.agent.name, 'create agent')) {
     $null = Invoke-Dv -Method Post -Path 'bots' -SolutionName $manifest.solution.uniqueName -Body @{
@@ -126,9 +129,9 @@ elseif ($PSCmdlet.ShouldProcess($manifest.agent.name, 'create agent')) {
     }
     $b = Invoke-Dv -Path "bots?`$filter=schemaname eq '$schema'&`$select=botid"
     $botId = $b.value[0].botid
-    Add-Change 'agent' $manifest.agent.name 'Created'
+    Add-Change -Kind 'agent' -Name $manifest.agent.name -Action 'Created'
 }
-else { Add-Change 'agent' $manifest.agent.name 'WouldCreate'; $botId = $null }
+else { Add-Change -Kind 'agent' -Name $manifest.agent.name -Action 'WouldCreate'; $botId = $null }
 
 # --- topics ----------------------------------------------------------------
 $topicsDir = Join-Path -Path (Join-Path -Path $root -ChildPath 'agent') -ChildPath 'topics'
@@ -142,13 +145,13 @@ foreach ($topic in $manifest.topics) {
     $existing = Invoke-Dv -Path "botcomponents?`$filter=schemaname eq '$($topic.schemaName)'&`$select=botcomponentid,data"
     if ($existing.value.Count) {
         if ($existing.value[0].data -eq $yaml) {
-            Add-Change 'topic' $topic.name 'Unchanged'
+            Add-Change -Kind 'topic' -Name $topic.name -Action 'Unchanged'
         }
         elseif ($PSCmdlet.ShouldProcess($topic.name, 'update topic')) {
             $null = Invoke-Dv -Method Patch -Path "botcomponents($($existing.value[0].botcomponentid))" -SolutionName $manifest.solution.uniqueName -Body @{ data = $yaml }
-            Add-Change 'topic' $topic.name 'Updated'
+            Add-Change -Kind 'topic' -Name $topic.name -Action 'Updated'
         }
-        else { Add-Change 'topic' $topic.name 'WouldUpdate' }
+        else { Add-Change -Kind 'topic' -Name $topic.name -Action 'WouldUpdate' }
     }
     elseif ($botId -and $PSCmdlet.ShouldProcess($topic.name, 'create topic')) {
         $null = Invoke-Dv -Method Post -Path 'botcomponents' -SolutionName $manifest.solution.uniqueName -Body @{
@@ -158,9 +161,9 @@ foreach ($topic in $manifest.topics) {
             data                     = $yaml
             'parentbotid@odata.bind' = "/bots($botId)"
         }
-        Add-Change 'topic' $topic.name 'Created'
+        Add-Change -Kind 'topic' -Name $topic.name -Action 'Created'
     }
-    else { Add-Change 'topic' $topic.name 'WouldCreate' }
+    else { Add-Change -Kind 'topic' -Name $topic.name -Action 'WouldCreate' }
 }
 
 foreach ($tmp in @($script:SendFile, $script:RecvFile)) {
